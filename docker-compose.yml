@@ -1,0 +1,144 @@
+services:
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: gid-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-gid}
+      MYSQL_USER: ${DB_USER:-gid_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-rootpassword}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./data_model/tables.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - gid-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: gid-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-gid_user}
+      - DB_PASSWORD=${DB_PASSWORD:-rootpassword}
+      - DB_NAME=${DB_NAME:-gid}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-me-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-True}
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
+    volumes:
+      - ./backend:/app
+      - ./data_model:/app/data_model
+    networks:
+      - gid-network
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend Application
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gid-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - gid-network
+    depends_on:
+      - backend
+
+  # Backend API 2
+  backend2:
+    build:
+      context: .
+      dockerfile: backend2/Dockerfile
+    container_name: gid-backend2
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-gid_user}
+      - DB_PASSWORD=${DB_PASSWORD:-rootpassword}
+      - DB_NAME=${DB_NAME:-gid}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-me-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-True}
+      - ALLOWED_ORIGINS=http://localhost:3001,http://localhost:8080
+    volumes:
+      - ./backend2:/app
+      - ./data_model:/app/data_model
+    networks:
+      - gid-network
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend Application 2
+  frontend2:
+    build:
+      context: ./frontend2
+      dockerfile: Dockerfile
+    container_name: gid-frontend2
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8001
+      - CHOKIDAR_USEPOLLING=true
+      - PORT=3001
+    volumes:
+      - ./frontend2:/app
+      - /app/node_modules
+    networks:
+      - gid-network
+    depends_on:
+      - backend2
+  # Keycloak
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: gid-keycloak
+    restart: always
+    command: start-dev --import-realm
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import
+      - keycloak_data:/opt/keycloak/data
+    networks:
+      - gid-network
+
+volumes:
+  mysql_data:
+  keycloak_data:
+
+networks:
+  gid-network:
+    driver: bridge
